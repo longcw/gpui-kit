@@ -843,6 +843,14 @@ impl DiffState {
         cx.notify();
     }
 
+    /// The side and byte offset in that side's source of the character at a
+    /// window point, as last painted; for a click that should land in an editor.
+    pub fn source_at(&self, point: gpui::Point<Pixels>) -> Option<(DiffSide, usize)> {
+        let key = self.geometry.borrow().key_at(point, None)?;
+        let (_, side, offset) = decode_key(key);
+        Some((side, offset))
+    }
+
     /// Returns selected source without gutters, diff markers or annotation content.
     pub fn selected_text(&self, cx: &App) -> String {
         if self.selection.has_local_selection(cx)
