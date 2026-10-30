@@ -232,6 +232,10 @@ pub struct DiffState {
     layout: Option<LayoutKey>,
     content_width: Pixels,
     row_height: Option<Pixels>,
+    /// Text whose occurrences are emphasized in code rows and the overview.
+    search: Option<SharedString>,
+    /// The original side's share of a split view's width.
+    split_ratio: f32,
     /// The list width the row-height hint was last applied at.
     hinted_width: Option<Pixels>,
     annotations: HashSet<(Option<DiffLinePosition>, SharedString, ElementId)>,
@@ -245,6 +249,30 @@ pub struct DiffState {
 }
 
 impl EventEmitter<DiffEvent> for DiffState {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffOverviewKind {
+    Added,
+    Deleted,
+    Modified,
+    /// A row holding the search text.
+    Match,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiffOverviewMark {
+    pub row: usize,
+    pub kind: DiffOverviewKind,
+}
+
+/// The display rows of a diff, summarized for an overview ruler.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiffOverview {
+    pub rows: usize,
+    pub marks: Vec<DiffOverviewMark>,
+    /// The rows currently in view, estimated from the uniform row height.
+    pub visible: Range<usize>,
+}
 impl Focusable for DiffState {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
@@ -365,6 +393,8 @@ impl DiffState {
             layout: None,
             content_width: px(0.),
             row_height: None,
+            search: None,
+            split_ratio: 0.5,
             hinted_width: None,
             annotations: HashSet::new(),
             window: None,
@@ -506,6 +536,91 @@ impl DiffState {
     }
     pub fn syntax_max_line_length(&self) -> usize {
         self.presentation_options.syntax_max_line_length
+    }
+    pub fn search(&self) -> Option<&SharedString> {
+        self.search.as_ref()
+    }
+    /// Emphasizes every occurrence of `query` in code rows; empty clears it.
+    pub fn set_search(&mut self, query: Option<SharedString>, cx: &mut Context<Self>) {
+        let query = query.filter(|query| !query.is_empty());
+        if self.search != query {
+            self.search = query;
+            cx.notify();
+        }
+    }
+    pub fn split_ratio(&self) -> f32 {
+        self.split_ratio
+    }
+    /// Sets the original side's share of a split view, kept between 15% and 85%.
+    pub fn set_split_ratio(&mut self, ratio: f32, cx: &mut Context<Self>) {
+        let ratio = ratio.clamp(0.15, 0.85);
+        if self.split_ratio != ratio {
+            self.split_ratio = ratio;
+            cx.notify();
+        }
+    }
+    /// Changed rows, search matches and the rows in view, in display-row terms,
+    /// for an overview ruler beside the diff.
+    pub fn overview(&self) -> DiffOverview {
+        let mut marks = Vec::new();
+        for (row, display) in self.rows.iter().enumerate() {
+            let DisplayRow::Code {
+                file,
+                original,
+                modified,
+                changed,
+                ..
+            } = display
+            else {
+                continue;
+            };
+            if *changed {
+                let kind = match (original, modified) {
+                    (Some(_), Some(_)) => DiffOverviewKind::Modified,
+                    (None, Some(_)) => DiffOverviewKind::Added,
+                    _ => DiffOverviewKind::Deleted,
+                };
+                marks.push(DiffOverviewMark { row, kind });
+            }
+            if let Some(query) = &self.search {
+                let document = &self.files[*file];
+                let matches = [
+                    (DiffSide::Original, original),
+                    (DiffSide::Modified, modified),
+                ]
+                .into_iter()
+                .any(|(side, ix)| {
+                    ix.is_some_and(|ix| document.lines(side)[ix].display().contains(query.as_ref()))
+                });
+                if matches {
+                    marks.push(DiffOverviewMark {
+                        row,
+                        kind: DiffOverviewKind::Match,
+                    });
+                }
+            }
+        }
+        let top = self.list.logical_scroll_top().item_ix;
+        let visible = match self.row_height {
+            Some(height) if height > px(0.) => {
+                (self.viewport.height / height).ceil().max(1.) as usize
+            }
+            _ => 1,
+        };
+        DiffOverview {
+            rows: self.rows.len(),
+            marks,
+            visible: top..(top + visible).min(self.rows.len()),
+        }
+    }
+    /// Scrolls so a display row, as numbered by [`Self::overview`], sits mid-view.
+    pub fn scroll_to_row(&mut self, row: usize, cx: &mut Context<Self>) {
+        let visible = self.overview().visible.len();
+        self.list.scroll_to(ListOffset {
+            item_ix: row.saturating_sub(visible / 2).min(self.rows.len()),
+            offset_in_item: px(0.),
+        });
+        cx.notify();
     }
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
         self.selected_lines.clone()

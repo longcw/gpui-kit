@@ -14,7 +14,7 @@ pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
 pub use presentation::DiffInlineUnit;
-pub use state::{DiffEvent, DiffState};
+pub use state::{DiffEvent, DiffOverview, DiffOverviewKind, DiffOverviewMark, DiffState};
 
 use std::{collections::HashMap, ops::Range, rc::Rc, sync::Arc};
 
@@ -493,8 +493,9 @@ fn render_diff(
     // The viewport owns pane geometry. Intrinsic source width is only used
     // by each cell's horizontal scroller, never by the split layout.
     let content_width = state.viewport().width;
+    let split_ratio = state.split_ratio();
     let column_width = if mode == DiffMode::Split {
-        content_width / 2.
+        content_width * split_ratio
     } else {
         content_width
     };
@@ -512,6 +513,7 @@ fn render_diff(
         mode,
         content_width,
         column_width,
+        search: state.search().cloned(),
         viewport_divider,
         text_width: state.content_width(),
         horizontal: state.horizontal_scroll().clone(),
@@ -581,17 +583,48 @@ fn render_diff(
         ))
         .when(viewport_divider, |this| {
             let width = px(1. / window.scale_factor());
-            this.child(
+            let grip = px(6.);
+            this.on_drag_move(
+                cx.listener(|this, event: &gpui::DragMoveEvent<SplitDrag>, _, cx| {
+                    let bounds = event.bounds;
+                    if bounds.size.width > px(0.) {
+                        let ratio = (event.event.position.x - bounds.left()) / bounds.size.width;
+                        this.set_split_ratio(ratio, cx);
+                    }
+                }),
+            )
+            .child(
                 div()
                     .id("diff-pane-divider")
                     .test_support()
                     .absolute()
                     .top_0()
                     .bottom_0()
-                    .left(gpui::relative(0.5))
+                    .left(gpui::relative(split_ratio))
                     .ml(-width)
                     .w(width)
                     .bg(cx.theme().border),
+            )
+            // A wider, invisible grip makes the one-pixel line easy to drag.
+            .child(
+                div()
+                    .id("diff-pane-divider-grip")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(gpui::relative(split_ratio))
+                    .ml(-grip / 2.)
+                    .w(grip)
+                    .cursor_col_resize()
+                    .on_drag(SplitDrag, |drag, _, _, cx| {
+                        gpui::AppContext::new(cx, |_| drag.clone())
+                    })
+                    .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
+                        // A double click restores even halves.
+                        if event.click_count() == 2 {
+                            this.set_split_ratio(0.5, cx);
+                        }
+                    })),
             )
         })
         .when(has_rows && !soft_wrap, |this| {
@@ -792,12 +825,24 @@ impl gpui_base::ScrollbarHandle for PaneScrollbar {
     }
 }
 
+/// Dragged by the split divider; the diff body turns its moves into a ratio.
+#[derive(Clone)]
+struct SplitDrag;
+
+impl gpui::Render for SplitDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui::Empty
+    }
+}
+
 struct CodePresentation {
     files: Vec<DiffFile>,
     presentations: Vec<Option<Arc<FilePresentation>>>,
     mode: DiffMode,
     content_width: Pixels,
+    /// The original side's width; the modified side takes the rest.
     column_width: Pixels,
+    search: Option<SharedString>,
     viewport_divider: bool,
     text_width: Pixels,
     horizontal: gpui::ScrollHandle,
@@ -828,6 +873,13 @@ struct CodePresentation {
 }
 
 impl CodePresentation {
+    /// A split side's width: the ratio's share for the original side, the rest for the modified one.
+    fn side_width(&self, side: DiffSide) -> Pixels {
+        match (self.mode, side) {
+            (DiffMode::Split, DiffSide::Modified) => self.content_width - self.column_width,
+            _ => self.column_width,
+        }
+    }
     fn position(&self, file: usize, side: DiffSide, ix: usize) -> DiffLinePosition {
         let document = &self.files[file];
         DiffLinePosition::new(
@@ -1492,7 +1544,7 @@ fn render_cell(
     cx: &mut App,
 ) -> AnyElement {
     let cell = v_flex()
-        .w(code.column_width)
+        .w(code.side_width(side))
         .min_w_0()
         .flex_shrink_0()
         .when(
@@ -1573,7 +1625,7 @@ fn render_unified_cell(
         .w(if single_column {
             code.content_width
         } else {
-            code.column_width
+            code.side_width(side)
         })
         .id((
             if side == DiffSide::Original {
@@ -1627,6 +1679,18 @@ fn line_highlights(
                 },
             )
         }));
+    }
+    if let Some(query) = code.search.as_ref() {
+        let text = line.display().as_ref();
+        for (start, found) in text.match_indices(query.as_ref()) {
+            highlights.push((
+                start..start + found.len(),
+                HighlightStyle {
+                    background_color: Some(cx.theme().yellow.opacity(0.35)),
+                    ..Default::default()
+                },
+            ));
+        }
     }
     if selected {
         highlights.push((
@@ -2018,6 +2082,8 @@ mod copy_tests;
 mod header_tests;
 #[cfg(test)]
 mod newline_tests;
+#[cfg(test)]
+mod overview_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]
