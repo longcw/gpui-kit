@@ -83,3 +83,47 @@ fn the_split_ratio_is_clamped(cx: &mut TestAppContext) {
         })
     });
 }
+
+#[gpui::test]
+fn a_scroll_anchor_keeps_the_view_when_files_are_replaced(cx: &mut TestAppContext) {
+    let (state, cx) = show(cx, DiffMode::Split);
+    let lines = |extra: &str| {
+        (0..60)
+            .map(|n| format!("line {n}\n{extra}"))
+            .collect::<String>()
+    };
+    let (original, modified) = (lines(""), lines("").replace("line 40\n", "line 40\nnote\n"));
+    let top =
+        |cx: &mut VisualTestContext| cx.update(|_, cx| state.read(cx).overview().visible.start);
+    cx.update(|_, cx| {
+        state.update(cx, |state, cx| {
+            state.set_context_lines(None, cx);
+            state.set_files(
+                [fixture::modified(
+                    "f.txt",
+                    &original,
+                    &original.replace("line 1\n", "one\n"),
+                )],
+                cx,
+            );
+            state.scroll_to_row(30, cx);
+        })
+    });
+    let before = top(cx);
+    cx.update(|_, cx| {
+        state.update(cx, |state, cx| {
+            let anchor = state.scroll_anchor().unwrap();
+            state.set_files(
+                [fixture::modified(
+                    "f.txt",
+                    &original,
+                    &modified.replace("line 1\n", "one\n"),
+                )],
+                cx,
+            );
+            state.restore_scroll(&anchor, cx);
+        })
+    });
+    assert!(before > 0);
+    assert_eq!(top(cx), before);
+}

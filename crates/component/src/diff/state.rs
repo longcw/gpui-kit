@@ -72,6 +72,8 @@ pub(crate) enum FoldExpansion {
     Up,
     /// The lines just below the preceding source.
     Down,
+    /// The lines next to the source on both sides.
+    Around,
     All,
 }
 
@@ -257,6 +259,14 @@ pub enum DiffOverviewKind {
     Modified,
     /// A row holding the search text.
     Match,
+}
+
+/// Where the view is scrolled, by source line, so it survives replacing the files.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiffScrollAnchor {
+    position: DiffLinePosition,
+    rows_before: usize,
+    offset: Pixels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -910,6 +920,29 @@ impl DiffState {
         }
     }
 
+    /// The source line at the top of the view, for [`Self::restore_scroll`].
+    pub fn scroll_anchor(&self) -> Option<DiffScrollAnchor> {
+        let top = self.list.logical_scroll_top();
+        let position = self.row_position(top.item_ix)?;
+        let rows_before = self.source_row(&position)?.checked_sub(top.item_ix)?;
+        Some(DiffScrollAnchor {
+            position,
+            rows_before,
+            offset: top.offset_in_item,
+        })
+    }
+
+    /// Scrolls back to an anchor, keeping its line where it was in the view.
+    pub fn restore_scroll(&mut self, anchor: &DiffScrollAnchor, cx: &mut Context<Self>) {
+        if let Some(row) = self.source_row(&anchor.position) {
+            self.list.scroll_to(ListOffset {
+                item_ix: row.saturating_sub(anchor.rows_before),
+                offset_in_item: anchor.offset,
+            });
+            cx.notify();
+        }
+    }
+
     /// Scrolls to the header of the file at `path`, a [`DiffFile::path`].
     pub fn scroll_to_file(&mut self, path: &str, cx: &mut Context<Self>) {
         let Some(item_ix) = self
@@ -944,13 +977,16 @@ impl DiffState {
         cx: &mut Context<Self>,
     ) {
         let lines = self.expansion_lines;
+        let up = pairs.end.saturating_sub(lines).max(pairs.start)..pairs.end;
+        let down = pairs.start..(pairs.start + lines).min(pairs.end);
         let revealed = match expansion {
-            FoldExpansion::All => pairs,
-            FoldExpansion::Up => pairs.end.saturating_sub(lines).max(pairs.start)..pairs.end,
-            FoldExpansion::Down => pairs.start..(pairs.start + lines).min(pairs.end),
+            FoldExpansion::All => vec![pairs],
+            FoldExpansion::Up => vec![up],
+            FoldExpansion::Down => vec![down],
+            FoldExpansion::Around => vec![down, up],
         };
         if let Some(expanded) = self.expanded.get_mut(file) {
-            expanded.push(revealed);
+            expanded.extend(revealed);
             self.rebuild_at_anchor();
             cx.notify();
         }

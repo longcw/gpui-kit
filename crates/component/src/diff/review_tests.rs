@@ -100,6 +100,8 @@ fn folds_expand_by_direction_and_short_ranges_stay_visible(cx: &mut TestAppConte
         assert_eq!(folds(state), [0..27, 37..52]);
         state.expand_fold(0, 0..27, FoldExpansion::All, cx);
         assert_eq!(folds(state), [37..52]);
+        state.expand_fold(0, 37..52, FoldExpansion::Around, cx);
+        assert_eq!(folds(state), [42..47]);
         state.collapse_unchanged(cx);
         assert_eq!(folds(state), [0..27, 32..57]);
     });

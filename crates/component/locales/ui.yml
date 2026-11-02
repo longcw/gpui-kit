@@ -586,6 +586,28 @@ Diff:
     de: "%{count} Zeilen darüber anzeigen"
     es: "Mostrar %{count} líneas anteriores"
     pt-BR: "Mostrar %{count} linhas acima"
+  ExpandAround:
+    en: Show %{count} lines above and below
+    zh-CN: 显示上下各 %{count} 行
+    zh-HK: 顯示上下各 %{count} 行
+    zh-TW: 顯示上下各 %{count} 行
+    ja: "上下の %{count} 行を表示"
+    ko: "위아래 %{count}줄 표시"
+    fr: "Afficher %{count} lignes au-dessus et en dessous"
+    de: "%{count} Zeilen darüber und darunter anzeigen"
+    es: "Mostrar %{count} líneas arriba y abajo"
+    pt-BR: "Mostrar %{count} linhas acima e abaixo"
+  ExpandAllClick:
+    en: "%{key}-click to show all %{count} lines"
+    zh-CN: "%{key}-点击显示全部 %{count} 行"
+    zh-HK: "%{key}-點擊顯示全部 %{count} 行"
+    zh-TW: "%{key}-點擊顯示全部 %{count} 行"
+    ja: "%{key}-クリックで %{count} 行すべてを表示"
+    ko: "%{key}-클릭하여 %{count}줄 모두 표시"
+    fr: "%{key}-clic pour afficher les %{count} lignes"
+    de: "%{key}-Klick zeigt alle %{count} Zeilen"
+    es: "%{key}-clic para mostrar las %{count} líneas"
+    pt-BR: "%{key}-clique para mostrar todas as %{count} linhas"
   ExpandBelow:
     en: Show %{count} lines below
     zh-CN: 显示下方 %{count} 行

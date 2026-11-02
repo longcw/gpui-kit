@@ -14,7 +14,9 @@ pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
 pub use presentation::DiffInlineUnit;
-pub use state::{DiffEvent, DiffOverview, DiffOverviewKind, DiffOverviewMark, DiffState};
+pub use state::{
+    DiffEvent, DiffOverview, DiffOverviewKind, DiffOverviewMark, DiffScrollAnchor, DiffState,
+};
 
 use std::{collections::HashMap, ops::Range, rc::Rc, sync::Arc};
 
@@ -1126,8 +1128,47 @@ fn render_fold(
             })
     };
     if matches!(code.hunk_separator, DiffHunkSeparator::Wave) {
-        let label = t!("Diff.ExpandLines", count = pairs.len()).to_string();
-        return expand(("expand", pairs.start), FoldExpansion::All)
+        // a click reveals the lines next to the source; alt-click reveals the whole fold
+        let (above, below) = (pairs.start > hunk.start, pairs.end < hunk.end);
+        let expansion = match (partial, above, below) {
+            (false, _, _) | (_, false, false) => FoldExpansion::All,
+            (_, true, true) => FoldExpansion::Around,
+            (_, true, false) => FoldExpansion::Down,
+            (_, false, true) => FoldExpansion::Up,
+        };
+        let all = t!("Diff.ExpandLines", count = pairs.len()).to_string();
+        let label = match expansion {
+            FoldExpansion::All => all,
+            FoldExpansion::Around => t!("Diff.ExpandAround", count = lines).to_string(),
+            FoldExpansion::Down => t!("Diff.ExpandBelow", count = lines).to_string(),
+            FoldExpansion::Up => t!("Diff.ExpandAbove", count = lines).to_string(),
+        };
+        let label = if matches!(expansion, FoldExpansion::All) {
+            label
+        } else {
+            let key = if cfg!(target_os = "macos") {
+                "⌥"
+            } else {
+                "Alt"
+            };
+            format!(
+                "{label}\n{}",
+                t!("Diff.ExpandAllClick", key = key, count = pairs.len())
+            )
+        };
+        let state = code.state.clone();
+        let fold = pairs.clone();
+        return expand(("expand", pairs.start), expansion)
+            .on_click(move |event, _, cx| {
+                let expansion = if event.modifiers().alt {
+                    FoldExpansion::All
+                } else {
+                    expansion
+                };
+                state.update(cx, |state, cx| {
+                    state.expand_fold(file, fold.clone(), expansion, cx)
+                })
+            })
             .custom(ButtonCustomVariant::new(cx))
             .w_full()
             .h(gpui::rems(0.75))
