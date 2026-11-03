@@ -934,12 +934,16 @@ impl DiffState {
 
     /// Scrolls back to an anchor, keeping its line where it was in the view.
     pub fn restore_scroll(&mut self, anchor: &DiffScrollAnchor, cx: &mut Context<Self>) {
+        self.scroll_to_anchor(anchor);
+        cx.notify();
+    }
+
+    fn scroll_to_anchor(&self, anchor: &DiffScrollAnchor) {
         if let Some(row) = self.source_row(&anchor.position) {
             self.list.scroll_to(ListOffset {
                 item_ix: row.saturating_sub(anchor.rows_before),
                 offset_in_item: anchor.offset,
             });
-            cx.notify();
         }
     }
 
@@ -1447,10 +1451,10 @@ impl DiffState {
 
     /// Rebuilds rows and restores the source line at the top of the viewport.
     fn rebuild_at_anchor(&mut self) {
-        let anchor = self.row_position(self.list.logical_scroll_top().item_ix);
+        let anchor = self.scroll_anchor();
         self.rebuild(false);
         if let Some(anchor) = anchor {
-            self.reveal_line(&anchor);
+            self.scroll_to_anchor(&anchor);
         }
     }
 

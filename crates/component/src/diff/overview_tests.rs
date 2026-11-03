@@ -127,3 +127,32 @@ fn a_scroll_anchor_keeps_the_view_when_files_are_replaced(cx: &mut TestAppContex
     assert!(before > 0);
     assert_eq!(top(cx), before);
 }
+
+#[gpui::test]
+fn expanding_context_keeps_the_view_still(cx: &mut TestAppContext) {
+    let (state, cx) = show(cx, DiffMode::Split);
+    let original = (0..80).map(|n| format!("line {n}\n")).collect::<String>();
+    let modified = original
+        .replace("line 10\n", "ten\n")
+        .replace("line 70\n", "seventy\n");
+    let top = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let state = state.read(cx);
+            let top = state.list().logical_scroll_top();
+            (state.scroll_anchor(), top.offset_in_item)
+        })
+    };
+    cx.update(|_, cx| {
+        state.update(cx, |state, cx| {
+            state.set_files([fixture::modified("f.txt", &original, &modified)], cx);
+            state.list().scroll_to(gpui::ListOffset {
+                item_ix: 6,
+                offset_in_item: px(5.),
+            });
+        })
+    });
+    let before = top(cx);
+    cx.update(|_, cx| state.update(cx, |state, cx| state.expand_unchanged(cx)));
+    assert_eq!(before.1, px(5.));
+    assert_eq!(top(cx), before);
+}
